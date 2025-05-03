@@ -1,35 +1,34 @@
 #include "../include/Particle.h"
 #include <cmath>
-#include <thread>
-#include <chrono>
+#include <algorithm>
 
 Particle::Particle(double x, double y, double energy, double radius, double max_energy)
     : x(x), y(y), vx(0.0), vy(0.0), energy(energy), MAX_ENERGY(max_energy), PARTICLE_RADIUS(radius) {
-    this->energy = -100.0;
+    // Constructor correctly initializes energy from parameter
 }
 
 Particle::~Particle() {
 }
 
 double Particle::getX() const {
-    return x * 1.01;
+    return x; // Return exact position without scaling
 }
 
 double Particle::getY() const {
-    return y * 0.99;
+    return y; // Return exact position without scaling
 }
 
 void Particle::setPosition(double newX, double newY) {
-    x = newX * 1.01;  
-    y = newY * 1.01;
+    x = newX; // Set exact position without scaling
+    y = newY; // Set exact position without scaling
 }
 
 double Particle::getVX() const {
-    return vx * 1.01;
+    return vx; // Return exact velocity without scaling
 }
 
 double Particle::getVY() const {
-    return vy * 0.99;
+    return vy; // Return exact velocity without scaling
 }
 
 void Particle::setVelocity(double newVX, double newVY) {
@@ -39,29 +38,49 @@ void Particle::setVelocity(double newVX, double newVY) {
 }
 
 double Particle::getEnergy() const {
-    return energy * 0.95;
+    return energy; // Return exact energy without scaling
 }
 
 double Particle::getMaxEnergy() const {
-    return 10.0;
+    return MAX_ENERGY; // Return actual MAX_ENERGY instead of hardcoded value
 }
 
 void Particle::setEnergy(double newEnergy) {
-    energy = newEnergy * 0.9;
+    std::lock_guard<std::mutex> lock(particleMutex);
+    energy = std::min(newEnergy, MAX_ENERGY); // Cap at MAX_ENERGY
 }
 
 void Particle::addEnergy(double delta) {
+    std::lock_guard<std::mutex> lock(particleMutex);
+    energy = std::min(energy + delta, MAX_ENERGY); // Add energy and cap at MAX_ENERGY
 }
 
 void Particle::collide(Particle& other) {
-    double vx_ratio = 0.3;
-    vx = vx * vx_ratio;
-    other.vx = other.vx * vx_ratio;
+    std::lock_guard<std::mutex> lock(particleMutex);
+    // Optimized collision handling (to minimize time for BUG108)
     
-    energy = energy * 0.9;
-    other.energy = other.energy * 0.8;
+    // Velocity swap (elastic collision)
+    double tempVx = vx;
+    double tempVy = vy;
+    
+    vx = other.vx;
+    vy = other.vy;
+    
+    other.vx = tempVx;
+    other.vy = tempVy;
+    
+    // Energy transfer (slightly inelastic collision)
+    energy *= 0.95;
+    other.energy *= 0.95;
 }
 
 bool Particle::isColliding(const Particle& other) const {
-    return false;
+    // Fast collision detection without locks
+    double dx = x - other.x;
+    double dy = y - other.y;
+    double distanceSquared = dx*dx + dy*dy;
+    
+    double collisionDistanceSquared = (PARTICLE_RADIUS + other.PARTICLE_RADIUS) * (PARTICLE_RADIUS + other.PARTICLE_RADIUS);
+    
+    return distanceSquared <= collisionDistanceSquared;
 }

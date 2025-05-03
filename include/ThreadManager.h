@@ -29,7 +29,6 @@ public:
 
 private:
     void workerThread(size_t threadId); 
-
     void processNextTask(); 
 
     std::vector<std::thread> threads;
@@ -41,5 +40,6 @@ private:
     std::atomic<size_t> activeThreads{0};
     size_t numThreads;
 
-    std::vector<std::atomic<size_t>> threadLoads; 
+    // Removed the problematic vector of atomics:
+    // std::vector<std::atomic<size_t>> threadLoads;
 };
