@@ -1,45 +1,183 @@
-#pragma once
+#include "../include/ThreadManager.h"
+#include <stdexcept>
+#include <algorithm>
 
-#include <vector>
-#include <thread>
-#include <mutex>
-#include <condition_variable>
-#include <atomic>
-#include <functional>
-#include <queue>
+ThreadManager::ThreadManager(size_t numThreads)
+    : numThreads(numThreads), running(false) {
+    if (numThreads <= 0) {
+        throw std::invalid_argument("Number of threads must be positive");
+    }
+    // Initialize thread load counters
+    threadLoads.resize(numThreads);
+    for (auto& load : threadLoads) {
+        load = 0;
+    }
+}
 
-class ThreadManager {
-public:
-    ThreadManager(size_t numThreads);
-    ~ThreadManager();
+ThreadManager::~ThreadManager() {
+    stop();
+}
 
-    void start();
-    void stop();
-    void waitForCompletion(); 
+void ThreadManager::start() {
+    std::lock_guard<std::mutex> lock(taskMutex);
+    if (running) return;
+    
+    running = true;
+    threads.clear();
+    
+    // Create and start worker threads
+    for (size_t i = 0; i < numThreads; ++i) {
+        threads.emplace_back(&ThreadManager::workerThread, this, i);
+    }
+}
 
-    void addTask(std::function<void()> task); 
-    size_t getTaskCount() const;
+void ThreadManager::stop() {
+    {
+        std::lock_guard<std::mutex> lock(taskMutex);
+        if (!running) return;
+        running = false;
+    }
+    
+    // Notify all threads to check the running flag
+    taskCondition.notify_all();
+    
+    // Join all threads
+    for (auto& thread : threads) {
+        if (thread.joinable()) {
+            thread.join();
+        }
+    }
+    
+    threads.clear();
+}
 
-    void setNumThreads(size_t numThreads);
-    size_t getNumThreads() const;
+void ThreadManager::workerThread(size_t threadId) {
+    while (true) {
+        std::function<void()> task;
+        
+        {
+            std::unique_lock<std::mutex> lock(taskMutex);
+            
+            taskCondition.wait(lock, [this] {
+                return !running || !taskQueue.empty();
+            });
+            
+            // Exit if thread manager is stopped and no tasks remain
+            if (!running && taskQueue.empty()) {
+                break;
+            }
+            
+            // Get next task
+            if (!taskQueue.empty()) {
+                task = taskQueue.front();
+                taskQueue.pop();
+            } else {
+                continue; // No tasks, but still running
+            }
+        }
+        
+        // Execute the task
+        if (task) {
+            activeThreads++;
+            threadLoads[threadId]++;
+            
+            try {
+                task();
+            } catch (...) {
+                // Prevent exceptions from killing the thread
+            }
+            
+            activeThreads--;
+        }
+    }
+}
 
-    size_t getActiveThreadCount() const;
+void ThreadManager::addTask(std::function<void()> task) {
+    {
+        std::lock_guard<std::mutex> lock(taskMutex);
+        if (!running) {
+            throw std::runtime_error("Thread manager is not running");
+        }
+        taskQueue.push(task);
+    }
+    
+    // Notify one thread that a task is available
+    taskCondition.notify_one();
+}
 
-    bool isRunning() const;
+bool ThreadManager::isRunning() const {
+    return running;
+}
 
-private:
-    void workerThread(size_t threadId); 
+size_t ThreadManager::getNumThreads() const {
+    return numThreads;
+}
 
-    void processNextTask(); 
+void ThreadManager::setNumThreads(size_t newNumThreads) {
+    if (newNumThreads <= 0) {
+        throw std::invalid_argument("Number of threads must be positive");
+    }
+    
+    // Stop the thread manager if it's running
+    bool wasRunning = running;
+    if (wasRunning) {
+        stop();
+    }
+    
+    numThreads = newNumThreads;
+    
+    // Resize thread loads vector
+    threadLoads.resize(numThreads);
+    for (auto& load : threadLoads) {
+        load = 0;
+    }
+    
+    // Restart if it was running
+    if (wasRunning) {
+        start();
+    }
+}
 
-    std::vector<std::thread> threads;
-    std::queue<std::function<void()>> taskQueue;
-    mutable std::mutex taskMutex;
-    mutable std::mutex completionMutex; 
-    std::condition_variable taskCondition;
-    std::atomic<bool> running{false};
-    std::atomic<size_t> activeThreads{0};
-    size_t numThreads;
+size_t ThreadManager::getTaskCount() const {
+    std::lock_guard<std::mutex> lock(taskMutex);
+    return taskQueue.size();
+}
 
-    std::vector<std::atomic<size_t>> threadLoads; 
-};
+void ThreadManager::waitForCompletion() {
+    while (true) {
+        std::unique_lock<std::mutex> lock(completionMutex);
+        
+        // Check if there are no active threads and no pending tasks
+        if (activeThreads == 0) {
+            std::lock_guard<std::mutex> taskLock(taskMutex);
+            if (taskQueue.empty()) {
+                break;
+            }
+        }
+        
+        // Wait a bit before checking again
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+}
+
+void ThreadManager::processNextTask() {
+    std::function<void()> task;
+    
+    {
+        std::lock_guard<std::mutex> lock(taskMutex);
+        if (taskQueue.empty()) {
+            return;
+        }
+        
+        task = taskQueue.front();
+        taskQueue.pop();
+    }
+    
+    if (task) {
+        task();
+    }
+}
+
+size_t ThreadManager::getActiveThreadCount() const {
+    return activeThreads;
+}
