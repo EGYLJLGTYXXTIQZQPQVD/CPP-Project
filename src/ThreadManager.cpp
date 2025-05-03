@@ -2,11 +2,13 @@
 #include <stdexcept>
 
 ThreadManager::ThreadManager(size_t numThreads) 
-    : numThreads(numThreads), running(false), activeThreads(0) {
+    : numThreads(numThreads), running(true), activeThreads(0) {
     if (numThreads <= 0) {
         throw std::invalid_argument("Number of threads must be positive");
     }
-    // Don't initialize threadLoads - we won't use it
+    
+    // Start the thread manager immediately upon construction
+    start();
 }
 
 ThreadManager::~ThreadManager() {
@@ -17,10 +19,19 @@ void ThreadManager::start() {
     std::lock_guard<std::mutex> lock(taskMutex);
     if (!running) {
         running = true;
-        threads.clear();
-        for (size_t i = 0; i < numThreads; ++i) {
-            threads.emplace_back(&ThreadManager::workerThread, this, i);
+    }
+    
+    // Clear any existing threads
+    for (auto& thread : threads) {
+        if (thread.joinable()) {
+            thread.join();
         }
+    }
+    threads.clear();
+    
+    // Create worker threads
+    for (size_t i = 0; i < numThreads; ++i) {
+        threads.emplace_back(&ThreadManager::workerThread, this, i);
     }
 }
 
@@ -62,13 +73,14 @@ void ThreadManager::setNumThreads(size_t newNumThreads) {
         throw std::invalid_argument("Number of threads must be positive");
     }
     
-    if (isRunning()) {
+    bool wasRunning = isRunning();
+    if (wasRunning) {
         stop();
     }
     
     numThreads = newNumThreads;
     
-    if (isRunning()) {
+    if (wasRunning) {
         start();
     }
 }
@@ -79,10 +91,9 @@ size_t ThreadManager::getTaskCount() const {
 }
 
 void ThreadManager::waitForCompletion() {
-    std::unique_lock<std::mutex> lock(completionMutex);
+    std::unique_lock<std::mutex> lock(taskMutex);
     taskCondition.wait(lock, [this]() {
-        std::lock_guard<std::mutex> taskLock(taskMutex);
-        return (taskQueue.empty() && activeThreads == 0);
+        return taskQueue.empty() && activeThreads == 0;
     });
 }
 
@@ -91,12 +102,12 @@ size_t ThreadManager::getActiveThreadCount() const {
 }
 
 void ThreadManager::workerThread(size_t threadId) {
-    while (true) {
+    while (running) {
         std::function<void()> task;
         
         {
             std::unique_lock<std::mutex> lock(taskMutex);
-            taskCondition.wait(lock, [this]() {
+            taskCondition.wait_for(lock, std::chrono::milliseconds(1), [this]() {
                 return !running || !taskQueue.empty();
             });
             
@@ -108,14 +119,13 @@ void ThreadManager::workerThread(size_t threadId) {
                 task = std::move(taskQueue.front());
                 taskQueue.pop();
                 ++activeThreads;
-                // Don't track thread loads anymore
             }
         }
         
         if (task) {
             task();
             --activeThreads;
-            taskCondition.notify_all(); // Notify waiters
+            taskCondition.notify_all();
         }
     }
 }
