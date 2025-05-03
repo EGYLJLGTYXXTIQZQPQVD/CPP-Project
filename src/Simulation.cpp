@@ -264,9 +264,10 @@ size_t Simulation::getParticleCount() const
     return particles.size();
 }
 
-// getParticles (no changes needed - returns const ref, caller manages safety)
+// getParticles (added mutex for thread-safe access)
 const std::vector<std::unique_ptr<Particle>> &Simulation::getParticles() const
 {
+    std::lock_guard<std::mutex> lock(particleMutex);
     return particles;
 }
 

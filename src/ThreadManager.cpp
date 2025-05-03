@@ -1,6 +1,5 @@
 #include "../include/ThreadManager.h"
 #include <stdexcept>
-#include <iostream> // For debugging messages
 
 // Constructor: Initialize thread count, but don't start threads yet.
 ThreadManager::ThreadManager(size_t numThreads)
@@ -9,7 +8,6 @@ ThreadManager::ThreadManager(size_t numThreads)
     if (threadCount == 0)
         threadCount = 1; // Ensure at least one thread
     // Threads are started explicitly via start() method
-    std::cout << "ThreadManager constructed for " << threadCount << " threads." << std::endl;
 }
 
 // Destructor: Ensure stop() is called to clean up threads.
@@ -20,7 +18,6 @@ ThreadManager::~ThreadManager()
     {
         stop();
     }
-    std::cout << "ThreadManager destructed." << std::endl;
 }
 
 // Start the worker threads.
@@ -28,20 +25,17 @@ void ThreadManager::start()
 {
     if (!workers.empty())
     {
-        std::cout << "ThreadManager::start() called, but workers already exist." << std::endl;
         // Optionally stop and restart, or just return. Let's just return for simplicity.
         return;
     }
     stopSignal.store(false); // Ensure stop signal is false
     busyThreads.store(0);    // Reset busy counter
     workers.reserve(threadCount);
-    std::cout << "Starting " << threadCount << " worker threads..." << std::endl;
     for (size_t i = 0; i < threadCount; ++i)
     {
         // Each thread executes the workerLoop method of this instance.
         workers.emplace_back(&ThreadManager::workerLoop, this);
     }
-    std::cout << "Worker threads started." << std::endl;
 }
 
 // Stop the ThreadManager.
@@ -54,7 +48,6 @@ void ThreadManager::stop()
     condition.notify_all(); // Wake up all threads
 
     // Wait for each worker thread to finish its current task (if any) and exit.
-    std::cout << "Stopping worker threads..." << std::endl;
     for (std::thread &worker : workers)
     {
         if (worker.joinable())
@@ -63,13 +56,11 @@ void ThreadManager::stop()
         }
     }
     workers.clear(); // Clear the vector of stopped threads
-    std::cout << "Worker threads stopped and joined." << std::endl;
 
     // Clear any remaining tasks in the queue after stopping
     std::lock_guard<std::mutex> lock(queueMutex);
     std::queue<std::function<void()>> emptyQueue;
     std::swap(taskQueue, emptyQueue); // Efficiently clear the queue
-    std::cout << "Task queue cleared." << std::endl;
 }
 
 // The main loop executed by each worker thread.
@@ -116,11 +107,11 @@ void ThreadManager::workerLoop()
             }
             catch (const std::exception &e)
             {
-                std::cerr << "ThreadManager caught exception in task: " << e.what() << std::endl;
+                // Handle exception in task
             }
             catch (...)
             {
-                std::cerr << "ThreadManager caught unknown exception in task." << std::endl;
+                // Handle unknown exception in task
             }
             busyThreads--; // Decrement busy counter after execution
 
@@ -162,8 +153,6 @@ void ThreadManager::setNumThreads(size_t newNumThreads)
     if (newNumThreads == threadCount && !workers.empty())
         return; // No change needed
 
-    std::cout << "Resizing ThreadManager from " << threadCount << " to " << newNumThreads << " threads..." << std::endl;
-
     // Stop existing threads first
     if (!workers.empty())
     {
@@ -173,7 +162,6 @@ void ThreadManager::setNumThreads(size_t newNumThreads)
     // Update thread count and restart
     threadCount = newNumThreads;
     start(); // Start the new set of threads
-    std::cout << "ThreadManager resized." << std::endl;
 }
 
 // Get the target number of threads.

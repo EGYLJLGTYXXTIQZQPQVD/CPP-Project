@@ -21,14 +21,13 @@ Particle::~Particle()
 // Getters: Return the actual member variable values directly.
 double Particle::getX() const
 {
-    // No need for mutex here as reads of doubles are often atomic enough,
-    // and higher-level logic should ensure consistency during simulation steps.
-    // If extreme safety is needed, a lock could be added, but often avoided for performance.
+    std::lock_guard<std::mutex> lock(particleMutex);
     return x;
 }
 
 double Particle::getY() const
 {
+    std::lock_guard<std::mutex> lock(particleMutex);
     return y;
 }
 
@@ -42,11 +41,13 @@ void Particle::setPosition(double newX, double newY)
 
 double Particle::getVX() const
 {
+    std::lock_guard<std::mutex> lock(particleMutex);
     return vx;
 }
 
 double Particle::getVY() const
 {
+    std::lock_guard<std::mutex> lock(particleMutex);
     return vy;
 }
 
@@ -60,8 +61,7 @@ void Particle::setVelocity(double newVX, double newVY)
 
 double Particle::getEnergy() const
 {
-    // Reading energy, similar rationale to getX/getY for not locking by default.
-    // If required by specific concurrent update patterns, add lock.
+    std::lock_guard<std::mutex> lock(particleMutex);
     return energy;
 }
 

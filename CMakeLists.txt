@@ -13,9 +13,6 @@ configure_file(
   COPYONLY
 )
 
-# Enable OpenMP
-find_package(OpenMP REQUIRED)
-
 # Add External Dependencies using FetchContent
 include(FetchContent)
 
@@ -50,9 +47,6 @@ target_include_directories(quantum_simulator PUBLIC
    ${CMAKE_CURRENT_SOURCE_DIR}/include
    ${json_SOURCE_DIR}/include
 )
-
-# Link OpenMP
-target_link_libraries(quantum_simulator PUBLIC OpenMP::OpenMP_CXX)
 
 # Add executable
 add_executable(quantum_simulator_app src/main.cpp)
