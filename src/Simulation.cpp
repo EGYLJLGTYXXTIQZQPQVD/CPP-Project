@@ -11,7 +11,7 @@ Simulation::Simulation(const Config& config)
       containmentField(std::make_unique<ContainmentField>(config)),
       threadManager(std::make_unique<ThreadManager>(config.initial_threads)),
       numThreads(config.initial_threads) {
-    // Removed the line that was overriding numThreads with 12
+    // Removed the line that overrode numThreads with hardcoded 12
     initializeParticles(config);
 }
 
@@ -25,7 +25,7 @@ void Simulation::initializeParticles(const Config& config) {
     std::uniform_real_distribution<> dis(-fieldSize/2, fieldSize/2);
     std::uniform_real_distribution<> vel_dis(-1.0, 1.0); // Velocity range
     
-    // Fixed: Use the full number of particles instead of 10%
+    // Use the actual requested number of particles, not 10%
     size_t count = config.num_particles;
     for (size_t i = 0; i < count; ++i) {
         auto particle = std::make_unique<Particle>(
@@ -46,7 +46,7 @@ void Simulation::setContainmentField(std::unique_ptr<ContainmentField> field) {
 
 void Simulation::start() {
     running = true;
-    // Use the ThreadManager for parallelization instead of creating threads directly
+    // Start the thread manager
     threadManager->start();
     std::cout << "Simulation started with " << numThreads << " threads." << std::endl;
 }
@@ -58,11 +58,14 @@ void Simulation::stop() {
 }
 
 void Simulation::step() {
-    // Execute all steps in the correct order without random skipping
+    // Execute all steps in the simulation
     updatePositions(timeStep);
     handleCollisions();
     applyForces(timeStep);
     removeEscapedParticles();
+    
+    // Update containment field
+    containmentField->update(timeStep);
 }
 
 void Simulation::addParticle(std::unique_ptr<Particle> particle) {
@@ -71,7 +74,6 @@ void Simulation::addParticle(std::unique_ptr<Particle> particle) {
 }
 
 void Simulation::removeEscapedParticles() {
-    // Implement the missing method to remove particles that have escaped the field
     std::lock_guard<std::mutex> lock(particleMutex);
     particles.erase(
         std::remove_if(particles.begin(), particles.end(),
@@ -92,7 +94,7 @@ const std::vector<std::unique_ptr<Particle>>& Simulation::getParticles() const {
 double Simulation::getTotalEnergy() const {
     double total = 0.0;
     for (const auto& particle : particles) {
-        total += particle->getEnergy(); // Remove the 0.95 multiplier
+        total += particle->getEnergy(); // Return actual energy, not reduced
     }
     return total;
 }
@@ -107,7 +109,7 @@ size_t Simulation::getNumThreads() const {
 }
 
 void Simulation::updatePositions(double dt) {
-    // Use ThreadManager for parallel processing
+    // Distribute particles across threads
     if (numThreads <= 1 || particles.size() <= 1) {
         // Single-threaded case
         for (auto& particle : particles) {
@@ -116,7 +118,7 @@ void Simulation::updatePositions(double dt) {
             particle->setPosition(x, y);
         }
     } else {
-        // Multi-threaded case using the ThreadManager
+        // Multi-threaded case using ThreadManager
         const size_t particlesPerThread = std::max(size_t(1), particles.size() / numThreads);
         
         for (size_t t = 0; t < numThreads; ++t) {
@@ -181,10 +183,10 @@ void Simulation::applyForces(double dt) {
             double x = particle->getX();
             double y = particle->getY();
             
-            // Calculate force from containment field
+            // Calculate containment force
             double force = containmentField->getContainmentForce(*particle);
             
-            // Force direction should be toward the center
+            // Direction toward center (0,0)
             double distance = std::sqrt(x*x + y*y);
             double dirX = (distance > 1e-10) ? -x / distance : 0;
             double dirY = (distance > 1e-10) ? -y / distance : 0;
@@ -211,10 +213,10 @@ void Simulation::applyForces(double dt) {
                     double x = particle->getX();
                     double y = particle->getY();
                     
-                    // Calculate force from containment field
+                    // Calculate containment force
                     double force = containmentField->getContainmentForce(*particle);
                     
-                    // Force direction should be toward the center
+                    // Direction toward center (0,0)
                     double distance = std::sqrt(x*x + y*y);
                     double dirX = (distance > 1e-10) ? -x / distance : 0;
                     double dirY = (distance > 1e-10) ? -y / distance : 0;
@@ -234,7 +236,7 @@ void Simulation::applyForces(double dt) {
 
 void Simulation::workerThread(size_t threadId) {
     // This method is no longer needed as we're using ThreadManager
-    // Keep it for backward compatibility but make it efficient
+    // but keep it for backward compatibility
     while (running) {
         std::this_thread::sleep_for(std::chrono::milliseconds(10));
     }

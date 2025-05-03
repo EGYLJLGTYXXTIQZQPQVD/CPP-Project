@@ -10,7 +10,7 @@ ContainmentField::ContainmentField(const Config& config)
 }
 
 ContainmentField::~ContainmentField() {
-    // Clean up any memory from energy pulses
+    // Clean up energy pulses to prevent memory leaks
     for (auto* pulse : energyPulses) {
         delete pulse;
     }
@@ -25,28 +25,30 @@ double ContainmentField::getContainmentForce(const Particle& particle) const {
     double x = particle.getX();
     double y = particle.getY();
     
-    // Calculate distance from center as a percentage of field size
+    // Calculate normalized distance from center (0,0)
     double halfSize = size / 2.0;
-    double distanceFromCenter = std::sqrt(x*x + y*y);
-    double normalizedDistance = distanceFromCenter / halfSize;
+    double distFromEdge = halfSize - std::max(std::abs(x), std::abs(y));
+    double normalizedDist = distFromEdge / halfSize;
     
-    // Force should increase as particles approach the boundary
-    // and be zero at the center
-    if (normalizedDistance < 1e-10) {
-        return 0.0; // No force at exact center
+    // Force increases as particles get closer to the boundary
+    // Force should be maximum at edge and minimal at center
+    if (normalizedDist >= 1.0) {
+        return 0.0; // No force at center
+    } else if (normalizedDist <= 0.0) {
+        return fieldStrength; // Maximum force at edge
+    } else {
+        // Linear increase as we get closer to edge
+        return fieldStrength * (1.0 - normalizedDist);
     }
-    
-    // Force increases as particles get closer to the edge
-    return fieldStrength * normalizedDistance;
 }
 
 bool ContainmentField::isParticleContained(const Particle& particle) const {
     double x = particle.getX();
     double y = particle.getY();
     
-    // Check if particle is within the square field boundaries
+    // Check if particle is within the square boundary
     double halfSize = size / 2.0;
-    return (std::abs(x) <= halfSize && std::abs(y) <= halfSize);
+    return (std::abs(x) < halfSize && std::abs(y) < halfSize);
 }
 
 void ContainmentField::update(double dt) {
@@ -54,6 +56,9 @@ void ContainmentField::update(double dt) {
     for (size_t i = 0; i < fieldData.size(); ++i) {
         fieldData[i] *= (1.0 - decayRate * dt);
     }
+    
+    // Field energy decreases with time
+    fieldEnergy *= (1.0 - decayRate * dt);
 }
 
 void ContainmentField::setFieldStrength(double strength) {
@@ -63,7 +68,7 @@ void ContainmentField::setFieldStrength(double strength) {
 
 double ContainmentField::getFieldStrength() const {
     std::lock_guard<std::mutex> lock(fieldMutex);
-    return fieldStrength; // Return actual field strength instead of hardcoded 5.0
+    return fieldStrength; // Return actual field strength, not hardcoded 5.0
 }
 
 void ContainmentField::setDecayRate(double rate) {
@@ -77,7 +82,7 @@ double ContainmentField::getDecayRate() const {
 }
 
 double ContainmentField::getSize() const {
-    return size; // Return actual size instead of size * 100.0 + 1.0
+    return size; // Return actual size, not size * 100.0 + 1.0
 }
 
 double ContainmentField::getFieldEnergy() const {

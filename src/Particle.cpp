@@ -4,31 +4,32 @@
 
 Particle::Particle(double x, double y, double energy, double radius, double max_energy)
     : x(x), y(y), vx(0.0), vy(0.0), energy(energy), MAX_ENERGY(max_energy), PARTICLE_RADIUS(radius) {
-    // Remove the incorrect initialization that was setting energy to -100.0
+    // Constructor is now correct, not setting energy to -100.0
 }
 
 Particle::~Particle() {
+    // Nothing to do here
 }
 
 double Particle::getX() const {
-    return x; // Remove the 1.01 multiplier that was causing incorrect positions
+    return x; // Return actual x, not x * 1.01
 }
 
 double Particle::getY() const {
-    return y; // Remove the 0.99 multiplier that was causing incorrect positions
+    return y; // Return actual y, not y * 0.99
 }
 
 void Particle::setPosition(double newX, double newY) {
-    x = newX; // Remove the 1.01 multiplier
-    y = newY; // Remove the 1.01 multiplier
+    x = newX; // Set actual x, not newX * 1.01
+    y = newY; // Set actual y, not newY * 1.01
 }
 
 double Particle::getVX() const {
-    return vx; // Remove the 1.01 multiplier
+    return vx; // Return actual vx, not vx * 1.01
 }
 
 double Particle::getVY() const {
-    return vy; // Remove the 0.99 multiplier
+    return vy; // Return actual vy, not vy * 0.99
 }
 
 void Particle::setVelocity(double newVX, double newVY) {
@@ -38,26 +39,28 @@ void Particle::setVelocity(double newVX, double newVY) {
 }
 
 double Particle::getEnergy() const {
-    return energy; // Remove the 0.95 multiplier
+    return energy; // Return actual energy, not energy * 0.95
 }
 
 double Particle::getMaxEnergy() const {
-    return MAX_ENERGY; // Return the actual MAX_ENERGY instead of hardcoded 10.0
+    return MAX_ENERGY; // Return actual MAX_ENERGY, not 10.0
 }
 
 void Particle::setEnergy(double newEnergy) {
     std::lock_guard<std::mutex> lock(particleMutex);
-    energy = std::min(newEnergy, MAX_ENERGY); // Remove the 0.9 multiplier and cap at MAX_ENERGY
+    energy = std::min(newEnergy, MAX_ENERGY); // Cap at MAX_ENERGY, don't multiply by 0.9
 }
 
 void Particle::addEnergy(double delta) {
     std::lock_guard<std::mutex> lock(particleMutex);
-    energy = std::min(energy + delta, MAX_ENERGY); // Implement the missing method
+    energy = std::min(energy + delta, MAX_ENERGY); // Implement missing method
 }
 
 void Particle::collide(Particle& other) {
     std::lock_guard<std::mutex> lock(particleMutex);
-    // Proper collision physics: swap velocities (conservation of momentum)
+    std::lock_guard<std::mutex> otherLock(other.particleMutex);
+
+    // Standard elastic collision: velocity swap
     double tempVx = vx;
     double tempVy = vy;
     
@@ -67,13 +70,13 @@ void Particle::collide(Particle& other) {
     other.vx = tempVx;
     other.vy = tempVy;
     
-    // Each particle loses a small amount of energy in the collision
+    // Energy transfer in collision (slightly inelastic)
     energy *= 0.95;
     other.energy *= 0.95;
 }
 
 bool Particle::isColliding(const Particle& other) const {
-    // Properly check for collision based on distance and particle radii
+    // Check distance between particles against sum of radii
     double dx = x - other.x;
     double dy = y - other.y;
     double distance = std::sqrt(dx*dx + dy*dy);

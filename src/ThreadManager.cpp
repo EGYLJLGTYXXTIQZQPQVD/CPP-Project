@@ -6,7 +6,12 @@ ThreadManager::ThreadManager(size_t numThreads)
     if (numThreads <= 0) {
         throw std::invalid_argument("Number of threads must be positive");
     }
-    threadLoads.resize(numThreads, 0);
+    
+    // Initialize threadLoads properly - create each atomic element individually
+    threadLoads.clear();
+    for (size_t i = 0; i < numThreads; ++i) {
+        threadLoads.push_back(0);
+    }
 }
 
 ThreadManager::~ThreadManager() {
@@ -69,7 +74,12 @@ void ThreadManager::setNumThreads(size_t newNumThreads) {
     {
         std::lock_guard<std::mutex> lock(taskMutex);
         numThreads = newNumThreads;
-        threadLoads.resize(numThreads, 0);
+        
+        // Properly handle the atomic vector
+        threadLoads.clear();
+        for (size_t i = 0; i < numThreads; ++i) {
+            threadLoads.push_back(0);
+        }
     }
     
     if (isRunning()) {
