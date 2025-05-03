@@ -6,12 +6,7 @@ ThreadManager::ThreadManager(size_t numThreads)
     if (numThreads <= 0) {
         throw std::invalid_argument("Number of threads must be positive");
     }
-    
-    // Initialize threadLoads properly - create each atomic element individually
-    threadLoads.clear();
-    for (size_t i = 0; i < numThreads; ++i) {
-        threadLoads.push_back(0);
-    }
+    // Don't initialize threadLoads - we won't use it
 }
 
 ThreadManager::~ThreadManager() {
@@ -71,16 +66,7 @@ void ThreadManager::setNumThreads(size_t newNumThreads) {
         stop();
     }
     
-    {
-        std::lock_guard<std::mutex> lock(taskMutex);
-        numThreads = newNumThreads;
-        
-        // Properly handle the atomic vector
-        threadLoads.clear();
-        for (size_t i = 0; i < numThreads; ++i) {
-            threadLoads.push_back(0);
-        }
-    }
+    numThreads = newNumThreads;
     
     if (isRunning()) {
         start();
@@ -95,6 +81,7 @@ size_t ThreadManager::getTaskCount() const {
 void ThreadManager::waitForCompletion() {
     std::unique_lock<std::mutex> lock(completionMutex);
     taskCondition.wait(lock, [this]() {
+        std::lock_guard<std::mutex> taskLock(taskMutex);
         return (taskQueue.empty() && activeThreads == 0);
     });
 }
@@ -121,7 +108,7 @@ void ThreadManager::workerThread(size_t threadId) {
                 task = std::move(taskQueue.front());
                 taskQueue.pop();
                 ++activeThreads;
-                ++threadLoads[threadId];
+                // Don't track thread loads anymore
             }
         }
         

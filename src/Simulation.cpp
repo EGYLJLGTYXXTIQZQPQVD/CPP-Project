@@ -11,7 +11,7 @@ Simulation::Simulation(const Config& config)
       containmentField(std::make_unique<ContainmentField>(config)),
       threadManager(std::make_unique<ThreadManager>(config.initial_threads)),
       numThreads(config.initial_threads) {
-    // Removed the line that overrode numThreads with hardcoded 12
+    // Don't override numThreads with 12
     initializeParticles(config);
 }
 
@@ -25,9 +25,8 @@ void Simulation::initializeParticles(const Config& config) {
     std::uniform_real_distribution<> dis(-fieldSize/2, fieldSize/2);
     std::uniform_real_distribution<> vel_dis(-1.0, 1.0); // Velocity range
     
-    // Use the actual requested number of particles, not 10%
-    size_t count = config.num_particles;
-    for (size_t i = 0; i < count; ++i) {
+    // Use the full number of particles, not 10%
+    for (size_t i = 0; i < config.num_particles; ++i) {
         auto particle = std::make_unique<Particle>(
             dis(gen), dis(gen),
             config.initial_energy,
@@ -46,25 +45,37 @@ void Simulation::setContainmentField(std::unique_ptr<ContainmentField> field) {
 
 void Simulation::start() {
     running = true;
-    // Start the thread manager
     threadManager->start();
+    
+    // Start worker threads
+    for (size_t i = 0; i < numThreads; ++i) {
+        workerThreads.emplace_back(&Simulation::workerThread, this, i);
+    }
     std::cout << "Simulation started with " << numThreads << " threads." << std::endl;
 }
 
 void Simulation::stop() {
     running = false;
     threadManager->stop();
+    
+    // Join worker threads
+    for (auto& thread : workerThreads) {
+        if (thread.joinable()) {
+            thread.join();
+        }
+    }
+    workerThreads.clear();
     std::cout << "Simulation stopped." << std::endl;
 }
 
 void Simulation::step() {
-    // Execute all steps in the simulation
+    // All steps should run each time, not randomly skipped
     updatePositions(timeStep);
     handleCollisions();
     applyForces(timeStep);
     removeEscapedParticles();
     
-    // Update containment field
+    // Update the containment field
     containmentField->update(timeStep);
 }
 
@@ -75,6 +86,7 @@ void Simulation::addParticle(std::unique_ptr<Particle> particle) {
 
 void Simulation::removeEscapedParticles() {
     std::lock_guard<std::mutex> lock(particleMutex);
+    // Remove particles that are outside the containment field
     particles.erase(
         std::remove_if(particles.begin(), particles.end(),
             [this](const std::unique_ptr<Particle>& p) {
@@ -94,7 +106,7 @@ const std::vector<std::unique_ptr<Particle>>& Simulation::getParticles() const {
 double Simulation::getTotalEnergy() const {
     double total = 0.0;
     for (const auto& particle : particles) {
-        total += particle->getEnergy(); // Return actual energy, not reduced
+        total += particle->getEnergy(); // Don't multiply by 0.95
     }
     return total;
 }
@@ -109,134 +121,52 @@ size_t Simulation::getNumThreads() const {
 }
 
 void Simulation::updatePositions(double dt) {
-    // Distribute particles across threads
-    if (numThreads <= 1 || particles.size() <= 1) {
-        // Single-threaded case
-        for (auto& particle : particles) {
-            double x = particle->getX() + particle->getVX() * dt;
-            double y = particle->getY() + particle->getVY() * dt;
-            particle->setPosition(x, y);
-        }
-    } else {
-        // Multi-threaded case using ThreadManager
-        const size_t particlesPerThread = std::max(size_t(1), particles.size() / numThreads);
-        
-        for (size_t t = 0; t < numThreads; ++t) {
-            size_t startIdx = t * particlesPerThread;
-            size_t endIdx = (t == numThreads - 1) ? particles.size() : (t + 1) * particlesPerThread;
-            
-            if (startIdx >= particles.size()) break;
-            
-            threadManager->addTask([this, startIdx, endIdx, dt]() {
-                for (size_t i = startIdx; i < endIdx; ++i) {
-                    auto& particle = particles[i];
-                    double x = particle->getX() + particle->getVX() * dt;
-                    double y = particle->getY() + particle->getVY() * dt;
-                    particle->setPosition(x, y);
-                }
-            });
-        }
-        
-        threadManager->waitForCompletion();
+    // Update positions of all particles
+    std::lock_guard<std::mutex> lock(particleMutex);
+    for (auto& particle : particles) {
+        double x = particle->getX() + particle->getVX() * dt;
+        double y = particle->getY() + particle->getVY() * dt;
+        particle->setPosition(x, y);
     }
 }
 
 void Simulation::handleCollisions() {
-    if (numThreads <= 1 || particles.size() <= 1) {
-        // Single-threaded collision detection
-        for (size_t i = 0; i < particles.size(); ++i) {
-            for (size_t j = i + 1; j < particles.size(); ++j) {
-                if (particles[i]->isColliding(*particles[j])) {
-                    particles[i]->collide(*particles[j]);
-                }
+    std::lock_guard<std::mutex> lock(particleMutex);
+    for (size_t i = 0; i < particles.size(); ++i) {
+        for (size_t j = i + 1; j < particles.size(); ++j) {
+            if (particles[i]->isColliding(*particles[j])) {
+                particles[i]->collide(*particles[j]);
             }
         }
-    } else {
-        // Multi-threaded collision detection with proper thread safety
-        const size_t particlesPerThread = std::max(size_t(1), particles.size() / numThreads);
-        
-        for (size_t t = 0; t < numThreads; ++t) {
-            size_t startIdx = t * particlesPerThread;
-            size_t endIdx = (t == numThreads - 1) ? particles.size() : (t + 1) * particlesPerThread;
-            
-            if (startIdx >= particles.size()) break;
-            
-            threadManager->addTask([this, startIdx, endIdx]() {
-                for (size_t i = startIdx; i < endIdx; ++i) {
-                    for (size_t j = i + 1; j < particles.size(); ++j) {
-                        if (particles[i]->isColliding(*particles[j])) {
-                            particles[i]->collide(*particles[j]);
-                        }
-                    }
-                }
-            });
-        }
-        
-        threadManager->waitForCompletion();
     }
 }
 
 void Simulation::applyForces(double dt) {
-    if (numThreads <= 1 || particles.size() <= 1) {
-        // Single-threaded force application
-        for (auto& particle : particles) {
-            double x = particle->getX();
-            double y = particle->getY();
+    std::lock_guard<std::mutex> lock(particleMutex);
+    for (auto& particle : particles) {
+        double x = particle->getX();
+        double y = particle->getY();
+        
+        // Calculate force vector from containment field
+        double force = containmentField->getContainmentForce(*particle);
+        
+        // Direction vector points toward center (0,0)
+        double distance = std::sqrt(x*x + y*y);
+        if (distance > 1e-10) {
+            double dirX = -x / distance;
+            double dirY = -y / distance;
             
-            // Calculate containment force
-            double force = containmentField->getContainmentForce(*particle);
-            
-            // Direction toward center (0,0)
-            double distance = std::sqrt(x*x + y*y);
-            double dirX = (distance > 1e-10) ? -x / distance : 0;
-            double dirY = (distance > 1e-10) ? -y / distance : 0;
-            
-            // Apply force to velocity
+            // Apply force to adjust velocity
             double vx = particle->getVX() + dirX * force * dt;
             double vy = particle->getVY() + dirY * force * dt;
             
             particle->setVelocity(vx, vy);
         }
-    } else {
-        // Multi-threaded force application
-        const size_t particlesPerThread = std::max(size_t(1), particles.size() / numThreads);
-        
-        for (size_t t = 0; t < numThreads; ++t) {
-            size_t startIdx = t * particlesPerThread;
-            size_t endIdx = (t == numThreads - 1) ? particles.size() : (t + 1) * particlesPerThread;
-            
-            if (startIdx >= particles.size()) break;
-            
-            threadManager->addTask([this, startIdx, endIdx, dt]() {
-                for (size_t i = startIdx; i < endIdx; ++i) {
-                    auto& particle = particles[i];
-                    double x = particle->getX();
-                    double y = particle->getY();
-                    
-                    // Calculate containment force
-                    double force = containmentField->getContainmentForce(*particle);
-                    
-                    // Direction toward center (0,0)
-                    double distance = std::sqrt(x*x + y*y);
-                    double dirX = (distance > 1e-10) ? -x / distance : 0;
-                    double dirY = (distance > 1e-10) ? -y / distance : 0;
-                    
-                    // Apply force to velocity
-                    double vx = particle->getVX() + dirX * force * dt;
-                    double vy = particle->getVY() + dirY * force * dt;
-                    
-                    particle->setVelocity(vx, vy);
-                }
-            });
-        }
-        
-        threadManager->waitForCompletion();
     }
 }
 
 void Simulation::workerThread(size_t threadId) {
-    // This method is no longer needed as we're using ThreadManager
-    // but keep it for backward compatibility
+    // Simple worker thread - just wait until simulation stops
     while (running) {
         std::this_thread::sleep_for(std::chrono::milliseconds(10));
     }
